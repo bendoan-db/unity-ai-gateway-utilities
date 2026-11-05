@@ -1,0 +1,147 @@
+# Unity AI Gateway test utilities
+
+Databricks notebooks for setting up and testing Unity AI Gateway (also called Unity Gateway). You describe the setup in YAML files, and the notebooks create it in your workspace.
+
+## What's in this repo
+
+| File | Purpose |
+|---|---|
+| `deploy-uaig/model-services.yaml` | The model services to create: destinations, fallbacks, rate limits, inference tables, service policies, and access. |
+| `deploy-uaig/service-policies.yaml` | Guardrails (built-in and custom) that model services can use. |
+| `deploy-uaig/deploy_model_service.py` | Notebook that creates or updates the model services and attaches their service policies. |
+| `deploy-uaig/permissions.yaml` | Which groups and users can use which model services. |
+| `deploy-uaig/grant_permissions.py` | Notebook that grants the access listed in `permissions.yaml`. |
+
+## Before you start
+
+- A Unity Catalog catalog and schema for the model services.
+- Account-level groups for the people who will use the services.
+- Serverless compute, or a cluster on Databricks Runtime 15.3 or above.
+- To use service policies, a workspace admin must turn on **Unity Gateway Service Policies** under **Settings > Previews**.
+
+The person who runs the notebooks needs:
+
+| To | Privileges |
+|---|---|
+| Create model services | `USE CATALOG` on the catalog. `USE SCHEMA`, `CREATE SERVICE`, `CREATE TABLE`, and `CREATE FUNCTION` on the schema. |
+| Route traffic and run LLM checks | `EXECUTE` on every destination and fallback model, and on every policy evaluator model. |
+| Update services and grant access | `MANAGE` or ownership on the model services, catalog, and schema. |
+
+## Set up
+
+1. Add this repo to your workspace as a Git folder, or import the `deploy-uaig` folder. Keep the YAML files in the same folder as the notebooks.
+2. In `model-services.yaml`, set `catalog` and `schema`, and list your model services.
+3. In `service-policies.yaml`, define the guardrails your services use.
+4. Run the `deploy_model_service` notebook.
+5. In `permissions.yaml`, list who can use each service, then run the `grant_permissions` notebook.
+
+Each YAML file has comments that explain every setting.
+
+### Model services
+
+```yaml
+catalog: my_catalog
+schema: ai_gateway
+
+model_services:
+  - name: poc_developers_chat
+    description: Chat model for PoC developers.
+    destinations:                    # with more than one, traffic_percentage must add up to 100
+      - provider: databricks
+        destination: system.ai.gpt-oss-120b
+        traffic_percentage: 70
+      - provider: databricks
+        destination: system.ai.databricks-claude-sonnet-4-6
+        traffic_percentage: 30
+    fallbacks:                       # tried in order when a destination fails
+      - provider: databricks
+        destination: system.ai.gpt-oss-20b
+    enable_inference_table: true
+    enable_rate_limits: true
+    service_policies: [jailbreak_detection, block_confidential_codenames]
+```
+
+| `provider` | `destination` |
+|---|---|
+| `databricks` | A Databricks-hosted model in `system.ai`. Names don't follow one pattern (for example, `system.ai.databricks-claude-sonnet-4-6` and `system.ai.gpt-oss-120b`), so copy them exactly from Catalog Explorer. |
+| `provisioned_throughput` | A Model Serving endpoint name. |
+| `external` | A model provider service (`catalog.schema.service`). Also set `external_model` to the provider's model name. Create the model provider service first. |
+
+### Service policies
+
+Define each policy once in `service-policies.yaml`, then list it by name under a model service's `service_policies`. Policies run in the order listed.
+
+| `type` | What it does | Uses an LLM |
+|---|---|---|
+| `block_unsafe_content` | Blocks unsafe or harmful content. | Yes |
+| `block_jailbreak` | Blocks jailbreak and prompt-injection attempts (input only). | Yes |
+| `block_hallucination` | Blocks hallucinated responses (output only). | Yes |
+| `detect_sensitive_data` | Blocks or redacts data such as credit card and Social Security numbers. | No |
+| `llm_judge` | Custom rule written in plain language. | Yes |
+| `sql` | Custom rule written in SQL. The notebook creates it as a Unity Catalog function. | No |
+
+Checks that use an LLM run on `system.ai.gpt-oss-20b` by default. Change `default_evaluator`, or set `evaluator` on a single policy. Set `mode: log` to record what a policy would decide without blocking anything.
+
+```yaml
+default_evaluator: system.ai.gpt-oss-20b
+
+service_policies:
+  - name: jailbreak_detection
+    type: block_jailbreak
+
+  - name: pii_redaction
+    type: detect_sensitive_data
+    action: redact
+    categories: [credit_card, us_ssn]
+```
+
+### Permissions
+
+```yaml
+groups:
+  - name: poc-developers
+    model_services:
+      - my_catalog.ai_gateway.poc_developers_chat
+
+users:
+  - name: first.last@example.com
+    model_services:
+      - my_catalog.ai_gateway.poc_developers_chat
+```
+
+The default privilege is `EXECUTE`, which lets them query the service. The notebook also grants `USE CATALOG` and `USE SCHEMA` on each service's catalog and schema. You can also grant access with the `permissions` block on each service in `model-services.yaml`.
+
+## Running again
+
+- `deploy_model_service` updates existing services to match the YAML: description, destinations, fallbacks, rate limits, inference table, and service policies. Taking a policy out of a service's list removes it from the service.
+- An inference table's location can't change after it's created.
+- Both notebooks only add access. Removing a group or user from a YAML file doesn't revoke its access.
+
+## Try it out
+
+Open **AI Gateway** in the workspace sidebar, select a model service, and send it a few prompts. Or query it from Python with the OpenAI client:
+
+```python
+import os
+from openai import OpenAI
+
+client = OpenAI(
+    api_key=os.environ["DATABRICKS_TOKEN"],
+    base_url=f"{os.environ['DATABRICKS_HOST'].rstrip('/')}/ai-gateway/mlflow/v1",
+)
+
+response = client.responses.create(
+    model="my_catalog.ai_gateway.poc_developers_chat",
+    input=[{"role": "user", "content": "What is Databricks?"}],
+)
+print(response.output_text)
+```
+
+- When a policy blocks a request, the response is still HTTP 200. It contains a short assistant message and a `databricks_service_policy` object with the reason.
+- Requests and responses are logged to the inference table `<catalog>.<schema>.<service name>_payload`.
+
+## Known limitations
+
+- Service policies are in Beta, and Databricks hasn't yet published an API for attaching them. `deploy_model_service` uses the model service API field that the AI Gateway UI uses, which may change when the feature is generally available.
+- Output checks wait for the full response, so streamed responses arrive all at once.
+- If a policy check fails (for example, the evaluator times out), the request is denied. Use `mode: log` while you test.

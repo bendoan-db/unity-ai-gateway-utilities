@@ -1,0 +1,29 @@
+# Who can use which Unity AI Gateway model services.
+# Edit this file, then run the grant_permissions notebook in the same folder.
+#
+# groups: account-level identity groups. Workspace-local groups can't receive Unity Catalog grants.
+# users:  user emails. Service principals can also go here, listed by application ID.
+#
+# Each entry:
+#   name:           group name, user email, or service principal application ID
+#   model_services: three-part names (catalog.schema.service) they can access
+#   privileges:     optional. Default [EXECUTE], which lets them query the service.
+#                   Add MANAGE only for people who also administer the service.
+#
+# The notebook also grants USE CATALOG and USE SCHEMA on each service's catalog and schema.
+# Access is only added. Removing an entry here doesn't revoke access.
+
+groups:
+  - name: poc-admins
+    model_services:
+      - my_catalog.ai_gateway.poc_admins_chat
+      - my_catalog.ai_gateway.poc_developers_chat
+
+  - name: poc-developers
+    model_services:
+      - my_catalog.ai_gateway.poc_developers_chat
+
+users:
+  - name: first.last@example.com
+    model_services:
+      - my_catalog.ai_gateway.poc_admins_chat

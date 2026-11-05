@@ -1,0 +1,92 @@
+# Model services to deploy to Unity AI Gateway.
+# Edit this file and service-policies.yaml, then run the deploy_model_service notebook in the same folder.
+# Running it again updates existing services to match this file.
+
+# Unity Catalog location for every model service, its inference table, and SQL service policies.
+catalog: my_catalog
+schema: ai_gateway
+
+# Default rate limit for services with enable_rate_limits: true.
+# Applied to each user separately. A service can override it with its own rate_limits block.
+rate_limits:
+  requests_per_minute: 60
+  tokens_per_minute: 100000
+
+model_services:
+  # destinations: models that receive traffic. With more than one, set traffic_percentage
+  #   on each so they add up to 100.
+  # fallbacks (optional): models tried in order when a destination fails.
+  #   Each destination and fallback has:
+  #     provider: databricks             -> destination is a Databricks-hosted model, e.g. system.ai.gpt-oss-120b
+  #               provisioned_throughput -> destination is a Model Serving endpoint name
+  #               external               -> destination is a model provider service (catalog.schema.service);
+  #                                         also set external_model to the provider's model name
+  #
+  # service_policies (optional): policy names from service-policies.yaml, evaluated in the order listed.
+  #
+  # permissions: who can use the service. principal is a user email, group name,
+  #   or service principal application ID. EXECUTE lets them query the service.
+  #   The notebook also grants USE CATALOG and USE SCHEMA so they can reach it.
+  #   Permissions are only added. Removing a principal here doesn't revoke its access.
+  #
+  # On re-run, a service's description, destinations, fallbacks, rate limits, inference table,
+  # and service policies are replaced with what's in this file. An inference table's location
+  # can't change after it's created.
+
+  - name: poc-kimi-admins
+    description: Chat model for PoC admins and power users.
+    destinations:
+      - provider: databricks
+        destination: system.ai.kimi-k3-1-pro
+    fallbacks:
+      - provider: databricks
+        destination: system.ai.claude-opus-5-5
+    enable_inference_table: true
+    enable_rate_limits: true
+    rate_limits:                  # optional override of the default above
+      requests_per_minute: 120
+      tokens_per_minute: 200000
+    service_policies: [jailbreak_detection, pii_redaction]
+    permissions:
+      - principal: poc-admins
+        privileges: [EXECUTE]
+
+  - name: poc-claude-opus-5-5-admins
+    description: Chat model for PoC developers. Splits traffic between two models.
+    destinations:
+      - provider: databricks
+        destination: system.ai.claude-opus-5-5
+        traffic_percentage: 70
+      - provider: databricks
+        destination: system.ai.claude-sonnet-5-5
+        traffic_percentage: 30
+    fallbacks:
+      - provider: databricks
+        destination: system.ai.gpt-6-1-sol
+    enable_inference_table: true
+    enable_rate_limits: true
+    service_policies:
+      - jailbreak_detection
+      - unsafe_content_detection
+      - block_confidential_codenames
+      - block_regulated_advice
+    permissions:
+      - principal: poc-developers
+        privileges: [EXECUTE]
+
+  # Example external model. Create the model provider service first, then uncomment.
+  # - name: poc_developers_external
+  #   description: External provider model for PoC developers.
+  #   destinations:
+  #     - provider: external
+  #       destination: my_catalog.ai_gateway.my_provider_service
+  #       external_model: gpt-5
+  #   fallbacks:
+  #     - provider: databricks
+  #       destination: system.ai.gpt-oss-120b
+  #   enable_inference_table: true
+  #   enable_rate_limits: true
+  #   service_policies: [jailbreak_detection]
+  #   permissions:
+  #     - principal: poc-developers
+  #       privileges: [EXECUTE]

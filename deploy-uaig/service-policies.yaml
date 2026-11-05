@@ -1,0 +1,76 @@
+# Service policies (guardrails) for Unity AI Gateway model services.
+# Define each policy once here, then list it by name under service_policies in model-services.yaml.
+# Names may use letters, numbers, and underscores only.
+
+# Model service that runs LLM-based checks, unless a policy sets its own evaluator.
+default_evaluator: system.ai.gpt-oss-20b
+
+# type options:
+#   block_unsafe_content  -> built-in. Blocks unsafe or harmful content. Uses an LLM.
+#   block_jailbreak       -> built-in. Blocks jailbreak and prompt-injection attempts. Input only. Uses an LLM.
+#   block_hallucination   -> built-in. Blocks hallucinated responses. Output only. Uses an LLM.
+#   detect_sensitive_data -> built-in. Finds data such as credit card and Social Security numbers. No LLM.
+#   llm_judge             -> custom. A rule written in plain language, checked by an LLM.
+#   sql                   -> custom. A fixed rule written in SQL. No LLM.
+#
+# Settings (all optional unless noted):
+#   phases:    [input], [output], or [input, output]. Defaults: block_jailbreak = [input],
+#              block_hallucination = [output], llm_judge = [input], others = [input, output].
+#              Output checks wait for the full response, so streamed responses arrive all at once.
+#              sql policies ignore this and run on both; check event:type in the SQL to target one.
+#   mode:      block (default) or log. Log records what the policy would decide without blocking.
+#   evaluator: model service for an LLM check. Default: default_evaluator above.
+#   max_turns: conversation turns an LLM check reads. Default: 10.
+#   rank:      evaluation order. Default: position in the model service's service_policies list.
+#              Lower ranks run first on input. LLM checks with the same rank run in parallel.
+#   detect_sensitive_data:
+#     action:     block (default) or redact
+#     categories: (required) any of email_address, ip_address, mac_address, vin, credit_card,
+#                 iban_code, phone_number, us_ssn, us_itin, us_passport, us_bank_number, uk_nhs,
+#                 uk_nino, in_pan, in_aadhaar
+#   llm_judge:
+#     instruction: (required) what to flag and what to allow. Don't ask for ALLOW/DENY or an output format.
+#   sql:
+#     sql:         (required) an expression that returns
+#                  to_variant_object(named_struct('result', 'ALLOW' or 'DENY', 'reason', '...')).
+#                  The notebook creates it as a function in the catalog and schema from model-services.yaml.
+#                  Reference: https://docs.databricks.com/aws/en/data-governance/unity-catalog/service-policies/policy-function-reference
+#     description: shown as the function's comment
+
+service_policies:
+  - name: jailbreak_detection
+    type: block_jailbreak
+
+  - name: unsafe_content_detection
+    type: block_unsafe_content
+    phases: [input, output]
+
+  - name: hallucination_detection
+    type: block_hallucination
+    mode: log
+
+  - name: pii_redaction
+    type: detect_sensitive_data
+    action: redact
+    categories: [credit_card, us_ssn, us_bank_number, email_address, phone_number]
+
+  - name: block_regulated_advice
+    type: llm_judge
+    mode: log
+    instruction: |
+      Flag requests that ask for individualized investment, tax, or legal advice, such as which
+      securities a specific person should buy or how a specific person should file their taxes.
+      Do not flag general questions, education about these topics, or questions about internal
+      processes and documents.
+
+  - name: block_confidential_codenames
+    type: sql
+    description: Deny requests that mention a confidential project codename.
+    sql: |
+      CASE
+        WHEN event:type::string = 'request'
+          AND (CONTAINS(LOWER(CAST(COALESCE(event:context.message, '') AS STRING)), 'project alpha')
+            OR CONTAINS(LOWER(CAST(COALESCE(event:context.message, '') AS STRING)), 'project beta'))
+        THEN to_variant_object(named_struct('result', 'DENY', 'reason', 'Mentions a confidential project codename.'))
+        ELSE to_variant_object(named_struct('result', 'ALLOW'))
+      END
