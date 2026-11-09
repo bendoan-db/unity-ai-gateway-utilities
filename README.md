@@ -29,11 +29,11 @@ The person who runs the notebooks needs:
 
 ## Set up
 
-1. Add this repo to your workspace as a Git folder, or import the `deploy-uaig` folder. Keep the YAML files in the same folder as the notebooks.
+1. Add this repo to your workspace as a Git folder (**Workspace > Create > Git folder**), or import the `deploy-uaig` folder. Keep the YAML files in the same folder as the notebooks.
 2. In `model-services.yaml`, set `catalog` and `schema`, and list your model services.
 3. In `service-policies.yaml`, define the guardrails your services use.
-4. Run the `deploy_model_service` notebook.
-5. In `permissions.yaml`, list who can use each service, then run the `grant_permissions` notebook.
+4. In `permissions.yaml`, list who can use each service.
+5. Run the notebooks. See [How to Run](#how-to-run).
 
 Each YAML file has comments that explain every setting.
 
@@ -111,7 +111,39 @@ users:
 
 The default privilege is `EXECUTE`, which lets them query the service. The notebook also grants `USE CATALOG` and `USE SCHEMA` on each service's catalog and schema. You can also grant access with the `permissions` block on each service in `model-services.yaml`.
 
-## Running again
+## How to Run
+
+Run `deploy_model_service` first, then `grant_permissions`. A model service has to exist before you can grant access to it.
+
+### From the Databricks UI
+
+1. Open the `deploy-uaig` folder in your workspace.
+2. Open the `deploy_model_service` notebook, connect it to **Serverless** compute (or a cluster on Databricks Runtime 15.3 or above), and click **Run all**.
+3. Check the output of the last cell. Each service shows `Created` or `Updated`, followed by its service policies and grants.
+   If a service fails, it shows `FAILED` with the reason, and the cell ends with an error that lists the failed services. Fix the YAML and run the notebook again.
+4. Open the `grant_permissions` notebook and click **Run all**. Each group or user shows the access it was granted, or `FAILED` with the reason.
+
+### From the command line
+
+This uses the [Databricks CLI](https://docs.databricks.com/aws/en/dev-tools/cli/) (v1.20.0 or above) with a profile for your workspace.
+
+```bash
+# Upload the folder. Notebooks lose their .py extension in the workspace.
+databricks workspace import-dir deploy-uaig /Workspace/Users/<you>/deploy-uaig --overwrite --profile <PROFILE>
+
+# Run the deploy notebook on serverless compute and wait for it to finish.
+databricks jobs submit --profile <PROFILE> --json '{
+  "run_name": "deploy-uaig",
+  "tasks": [{
+    "task_key": "deploy",
+    "notebook_task": {"notebook_path": "/Workspace/Users/<you>/deploy-uaig/deploy_model_service", "source": "WORKSPACE"}
+  }]
+}'
+```
+
+Run `grant_permissions` the same way, with `grant_permissions` at the end of `notebook_path`. Each command prints the run's result and a `run_page_url`. Open that link to see the notebook output. After you edit a YAML file, upload the folder again before you rerun.
+
+### Running again
 
 - `deploy_model_service` updates existing services to match the YAML: description, destinations, fallbacks, rate limits, inference table, and service policies. Taking a policy out of a service's list removes it from the service.
 - An inference table's location can't change after it's created.
