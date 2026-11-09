@@ -3,7 +3,7 @@ name: uaig-test-utilities
 description: "Work with this repo's Unity AI Gateway (Unity Gateway) test utilities: the deploy-uaig notebooks and their YAML configs (model-services.yaml, service-policies.yaml, permissions.yaml). Use when setting up a new customer test, editing model services, destinations, fallbacks, rate limits, inference tables, service policies (guardrails), or access grants, when deploying or verifying them in a workspace, or when changing the notebooks."
 compatibility: Requires databricks CLI (>= v1.20.0). Local dry runs need Python with databricks-sdk (>= 0.161.0) and pyyaml.
 metadata:
-  version: "0.1.0"
+  version: "0.2.0"
 parent: databricks-unity-gateway
 ---
 
@@ -26,15 +26,15 @@ This repo gives customers Databricks notebooks for setting up and testing Unity 
 
 | File | Purpose |
 |---|---|
-| `deploy-uaig/model-services.yaml` | Global `catalog`/`schema`, default `rate_limits`, and `model_services`. Each service has a name, description, destinations (with optional traffic split), fallbacks, inference table and rate limit switches, policy names, and a `permissions` block. |
+| `deploy-uaig/model-services.yaml` | Global `catalog`/`schema`, default `rate_limits`, and `model_services`. Each service has a name, description, destinations (with optional traffic split), fallbacks, inference table and rate limit switches, and policy names. No access settings. |
 | `deploy-uaig/service-policies.yaml` | `default_evaluator` (`system.ai.gpt-oss-20b`) and every policy definition, built-in and custom, with its behavior settings. |
-| `deploy-uaig/deploy_model_service.py` | Creates or updates services, creates SQL policy functions, attaches policies, and applies the `permissions` blocks. |
+| `deploy-uaig/deploy_model_service.py` | Creates or updates services, creates SQL policy functions, and attaches policies. It doesn't grant access. |
 | `deploy-uaig/permissions.yaml` | `groups` and `users`, each with `model_services` (three-part names) and optional `privileges` (default `EXECUTE`). |
 | `deploy-uaig/grant_permissions.py` | Grants `permissions.yaml`, plus `USE CATALOG` and `USE SCHEMA` on the parents. It only adds access, never revokes. |
 | `README.md` | User-facing guide. Keep it in sync with the configs. |
 | `skill/uaig-test-utilities/scripts/dry_run.py` | Runs a notebook locally with a fake client and prints the API calls it would make. |
 
-Access can currently be granted in two places: the `permissions` blocks in `model-services.yaml` and `permissions.yaml`. Both only add access.
+`permissions.yaml` and `grant_permissions` are the only place access is granted. Don't add access settings to `model-services.yaml` or grant calls to `deploy_model_service`. Run `grant_permissions` after `deploy_model_service`. Until then, only the service's creator can use a new service.
 
 ## How deploy_model_service works
 
@@ -45,7 +45,8 @@ Access can currently be granted in two places: the `permissions` blocks in `mode
    - If the service exists, sends `PATCH` with `update_mask=comment,config.routing.destinations,config.routing.fallback.destinations,config.rate_limits,config.inference_table`.
    - Otherwise, sends `POST /api/2.1/unity-catalog/model-services?parent=schemas/<c>.<s>&model_service_id=<name>`.
 3. Sets policies with `PATCH ...?update_mask=config.service_policies`. It skips this only when the YAML lists no policies and the service has none attached.
-4. Applies the `permissions` blocks with `w.grants.update` (securable types `catalog`, `schema`, and `model_service`).
+
+`grant_permissions` grants with `w.grants.update`, using securable types `catalog`, `schema`, and `model_service`.
 
 The notebook calls `w.api_client.do` instead of `w.ai_gateway`, because the SDK's `ModelService` type silently drops `config.service_policies`.
 
@@ -80,12 +81,25 @@ To see a real example, read any service that has policies attached in the UI wit
 
 ### Destination names
 
-A `databricks` destination is the Unity Catalog model behind a `system.ai` model service, and the names don't follow one pattern. For example, the `claude-sonnet-4-6` service routes to `system.ai.databricks-claude-sonnet-4-6`, but the `gpt-oss-120b` service routes to `system.ai.gpt-oss-120b`. Look the name up rather than guessing:
+A `databricks` destination or fallback must be a **Unity Catalog model**, not a `system.ai` model service name. This is the most common config mistake. Most models carry a `databricks-` prefix that their service name doesn't:
+
+| Model service (don't use as a destination) | Model (use this) |
+|---|---|
+| `system.ai.claude-opus-5-5` | `system.ai.databricks-claude-opus-5-5` |
+| `system.ai.claude-sonnet-5-5` | `system.ai.databricks-claude-sonnet-5-5` |
+| `system.ai.kimi-k3-1-pro` | `system.ai.databricks-kimi-k3-1-pro` |
+| `system.ai.gpt-6-1-sol` | `system.ai.databricks-gpt-6-1-sol` |
+| `system.ai.gpt-oss-120b` | `system.ai.gpt-oss-120b` (no prefix) |
+
+Look the model up rather than guessing, then confirm it exists:
 
 ```bash
 databricks ai-gateway get-model-service model-services/system.ai.<service> --profile <PROFILE> -o json
-# use config.routing.destinations[].pay_per_token_config.model, without the "models/" prefix
+# the model is config.routing.destinations[].pay_per_token_config.model, without the "models/" prefix
+databricks registered-models get system.ai.<model> --profile <PROFILE>   # fails for a service name
 ```
+
+Policy evaluators are the opposite. `evaluator` and `default_evaluator` in `service-policies.yaml` take a **model service** name, such as `system.ai.gpt-oss-20b`, because the notebook sends them as `model-services/<name>`.
 
 The notebook names each destination after its model (external destinations use `<provider service>.<external_model>`).
 
@@ -102,12 +116,14 @@ The notebook names each destination after its model (external destinations use `
 2. **Check that the inputs exist** (read-only):
    ```bash
    databricks schemas get <catalog>.<schema> --profile <PROFILE>
-   databricks ai-gateway get-model-service model-services/system.ai.<service> --profile <PROFILE> -o json
+   databricks registered-models get system.ai.<model> --profile <PROFILE>                       # every databricks destination and fallback
+   databricks ai-gateway get-model-service model-services/system.ai.<service> --profile <PROFILE>   # every policy evaluator
    databricks ai-gateway get-model-provider-service model-provider-services/<c>.<s>.<svc> --profile <PROFILE>   # external destinations
    ```
    - Groups must be account-level.
    - A workspace admin must turn on the **Unity Gateway Service Policies** preview. You can't check this from the CLI, so ask.
 3. **Edit the YAML files.** Keep their comment blocks accurate.
+   - Model services are named `<catalog>.<schema>.<name>` in `permissions.yaml`. When you rename or add a service in `model-services.yaml`, update `permissions.yaml` to match, or `grant_permissions` fails for that service.
 4. **Dry-run locally.** See below.
 5. **Deploy, after the user confirms.** Upload the folder and run the notebook on serverless:
    ```bash
@@ -140,7 +156,7 @@ The dry run runs a notebook's real code with a fake `WorkspaceClient` and fake `
 ```bash
 python3 -m venv /tmp/uaig-venv && /tmp/uaig-venv/bin/pip install -q "databricks-sdk>=0.161.0" pyyaml
 /tmp/uaig-venv/bin/python skill/uaig-test-utilities/scripts/dry_run.py deploy-uaig/deploy_model_service.py
-/tmp/uaig-venv/bin/python skill/uaig-test-utilities/scripts/dry_run.py deploy-uaig/deploy_model_service.py --existing my_catalog.ai_gateway.poc_admins_chat
+/tmp/uaig-venv/bin/python skill/uaig-test-utilities/scripts/dry_run.py deploy-uaig/deploy_model_service.py --existing <catalog>.<schema>.<service>
 /tmp/uaig-venv/bin/python skill/uaig-test-utilities/scripts/dry_run.py deploy-uaig/grant_permissions.py
 ```
 
@@ -150,7 +166,9 @@ python3 -m venv /tmp/uaig-venv && /tmp/uaig-venv/bin/pip install -q "databricks-
 
 | Symptom | Likely cause |
 |---|---|
+| Creating or updating a service fails with a destination that doesn't exist | The destination is a model service name, not a model. See [Destination names](#destination-names). For most models, add the `databricks-` prefix. |
 | `PERMISSION_DENIED` creating a service | The runner lacks `CREATE SERVICE` or `USE SCHEMA` on the schema, `USE CATALOG` on the catalog, or `EXECUTE` on a destination. |
+| `grant_permissions` fails with a model service that doesn't exist | `permissions.yaml` still uses an old service name, or `deploy_model_service` hasn't run yet. |
 | The `config.service_policies` PATCH fails | The Service Policies preview is off, or the API changed at GA. Check the service's **Policies** tab in the AI Gateway UI. |
 | `policy function '<name>' SQL cannot be transpiled to CEL` | The SQL policy uses something unsupported, such as `ai_query`, subqueries, `BETWEEN`, aggregates, or a `COALESCE`/`CONCAT` with more than two arguments. |
 | A SQL policy denies everything | A comparison on a missing field fails closed. Wrap fields in `CAST(COALESCE(event:<path>, '') AS STRING)`. |

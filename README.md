@@ -6,7 +6,7 @@ Databricks notebooks for setting up and testing Unity AI Gateway (also called Un
 
 | File | Purpose |
 |---|---|
-| `deploy-uaig/model-services.yaml` | The model services to create: destinations, fallbacks, rate limits, inference tables, service policies, and access. |
+| `deploy-uaig/model-services.yaml` | The model services to create: destinations, fallbacks, rate limits, inference tables, and service policies. |
 | `deploy-uaig/service-policies.yaml` | Guardrails (built-in and custom) that model services can use. |
 | `deploy-uaig/deploy_model_service.py` | Notebook that creates or updates the model services and attaches their service policies. |
 | `deploy-uaig/permissions.yaml` | Which groups and users can use which model services. |
@@ -25,7 +25,8 @@ The person who runs the notebooks needs:
 |---|---|
 | Create model services | `USE CATALOG` on the catalog. `USE SCHEMA`, `CREATE SERVICE`, `CREATE TABLE`, and `CREATE FUNCTION` on the schema. |
 | Route traffic and run LLM checks | `EXECUTE` on every destination and fallback model, and on every policy evaluator model. |
-| Update services and grant access | `MANAGE` or ownership on the model services, catalog, and schema. |
+| Update services | `MANAGE` or ownership on the model services. |
+| Grant access (`grant_permissions`) | `MANAGE` or ownership on the model services, and on their catalogs and schemas. |
 
 ## Set up
 
@@ -109,17 +110,17 @@ users:
       - my_catalog.ai_gateway.poc_developers_chat
 ```
 
-The default privilege is `EXECUTE`, which lets them query the service. The notebook also grants `USE CATALOG` and `USE SCHEMA` on each service's catalog and schema. You can also grant access with the `permissions` block on each service in `model-services.yaml`.
+This is the only place to grant access to model services. The default privilege is `EXECUTE`, which lets them query the service. The notebook also grants `USE CATALOG` and `USE SCHEMA` on each service's catalog and schema. Services can be in any catalog and schema, including ones this repo didn't create.
 
 ## How to Run
 
-Run `deploy_model_service` first, then `grant_permissions`. A model service has to exist before you can grant access to it.
+Run `deploy_model_service` first, then `grant_permissions`. A model service has to exist before you can grant access to it, and until you do, only the person who created it can use it. To change who has access, edit `permissions.yaml` and rerun only `grant_permissions`.
 
 ### From the Databricks UI
 
 1. Open the `deploy-uaig` folder in your workspace.
 2. Open the `deploy_model_service` notebook, connect it to **Serverless** compute (or a cluster on Databricks Runtime 15.3 or above), and click **Run all**.
-3. Check the output of the last cell. Each service shows `Created` or `Updated`, followed by its service policies and grants.
+3. Check the output of the last cell. Each service shows `Created` or `Updated`, followed by its service policies.
    If a service fails, it shows `FAILED` with the reason, and the cell ends with an error that lists the failed services. Fix the YAML and run the notebook again.
 4. Open the `grant_permissions` notebook and click **Run all**. Each group or user shows the access it was granted, or `FAILED` with the reason.
 
@@ -147,7 +148,7 @@ Run `grant_permissions` the same way, with `grant_permissions` at the end of `no
 
 - `deploy_model_service` updates existing services to match the YAML: description, destinations, fallbacks, rate limits, inference table, and service policies. Taking a policy out of a service's list removes it from the service.
 - An inference table's location can't change after it's created.
-- Both notebooks only add access. Removing a group or user from a YAML file doesn't revoke its access.
+- `grant_permissions` only adds access. Removing a group or user from `permissions.yaml` doesn't revoke its access.
 
 ## Try it out
 

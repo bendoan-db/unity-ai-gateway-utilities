@@ -16,14 +16,14 @@
 groups:
   - name: poc-admins
     model_services:
-      - my_catalog.ai_gateway.poc_admins_chat
-      - my_catalog.ai_gateway.poc_developers_chat
+      - my_catalog.ai_gateway.poc-kimi-admins
+      - my_catalog.ai_gateway.poc-claude-opus-5-5-admins
 
   - name: poc-developers
     model_services:
-      - my_catalog.ai_gateway.poc_developers_chat
+      - my_catalog.ai_gateway.poc-claude-opus-5-5-admins
 
 users:
   - name: first.last@example.com
     model_services:
-      - my_catalog.ai_gateway.poc_admins_chat
+      - my_catalog.ai_gateway.poc-kimi-admins

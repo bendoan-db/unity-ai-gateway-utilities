@@ -2,8 +2,8 @@
 # MAGIC %md
 # MAGIC # Deploy Unity AI Gateway model services
 # MAGIC
-# MAGIC Creates or updates the model services listed in `model-services.yaml`, attaches their service policies
-# MAGIC (guardrails) from `service-policies.yaml`, and grants user access to them.
+# MAGIC Creates or updates the model services listed in `model-services.yaml` and attaches their service policies
+# MAGIC (guardrails) from `service-policies.yaml`. To give groups and users access, run `grant_permissions` afterward.
 # MAGIC
 # MAGIC **How to use**
 # MAGIC 1. Edit `model-services.yaml` and `service-policies.yaml` (in the same folder as this notebook).
@@ -13,13 +13,11 @@
 # MAGIC - Creates a Unity Catalog function for each `sql` service policy.
 # MAGIC - Creates each model service, or updates it if it already exists. An update replaces the service's description,
 # MAGIC   destinations, fallbacks, rate limits, inference table, and service policies with what's in the config.
-# MAGIC - Grants the listed privileges, plus `USE CATALOG` and `USE SCHEMA` on the parent catalog and schema.
-# MAGIC   Access is only added, never removed.
 # MAGIC
 # MAGIC **You need**
 # MAGIC - The **Unity Gateway Service Policies** preview turned on by a workspace admin (Settings > Previews).
 # MAGIC - `USE CATALOG` on the catalog, and `USE SCHEMA`, `CREATE SERVICE`, `CREATE TABLE`, and `CREATE FUNCTION` on the schema.
-# MAGIC - `MANAGE` (or ownership) on existing services you update, and on the catalog and schema to grant access to others.
+# MAGIC - `MANAGE` (or ownership) on existing services you update.
 # MAGIC - `EXECUTE` on each destination and fallback model, and on each policy evaluator (default `system.ai.gpt-oss-20b`).
 # MAGIC
 # MAGIC **Note:** Service policies are in Beta, and Databricks has not yet published an API for attaching them.
@@ -30,7 +28,6 @@
 import yaml
 from databricks.sdk import WorkspaceClient
 from databricks.sdk.errors import NotFound
-from databricks.sdk.service.catalog import PermissionsChange, Privilege
 
 MODEL_SERVICES_PATH = "model-services.yaml"
 SERVICE_POLICIES_PATH = "service-policies.yaml"
@@ -194,25 +191,6 @@ def get_model_service(full_name):
         return None
 
 
-def grant_access(full_name, permissions):
-    """Grant users access to a model service and its parent catalog and schema.
-
-    Args:
-        full_name (str): The service's three-part name, `catalog.schema.service`.
-        permissions (list[dict]): Entries with a `principal` and a list of `privileges`.
-    """
-    for permission in permissions:
-        principal = permission["principal"]
-        privileges = [Privilege(p.upper().replace(" ", "_")) for p in permission.get("privileges", ["EXECUTE"])]
-
-        w.grants.update("catalog", CATALOG, changes=[PermissionsChange(principal=principal, add=[Privilege.USE_CATALOG])])
-        w.grants.update(
-            "schema", f"{CATALOG}.{SCHEMA}", changes=[PermissionsChange(principal=principal, add=[Privilege.USE_SCHEMA])]
-        )
-        w.grants.update("model_service", full_name, changes=[PermissionsChange(principal=principal, add=privileges)])
-        print(f"  Granted {', '.join(p.value for p in privileges)} to {principal}")
-
-
 # COMMAND ----------
 
 # MAGIC %md
@@ -354,7 +332,7 @@ def set_service_policies(full_name, policies):
 
 
 def deploy_model_service(service):
-    """Create or update one model service, set its service policies, and grant access.
+    """Create or update one model service and set its service policies.
 
     Args:
         service (dict): One entry from `model_services` in model-services.yaml.
@@ -382,8 +360,6 @@ def deploy_model_service(service):
     old_policies = (existing or {}).get("config", {}).get("service_policies")
     if policies or old_policies:
         set_service_policies(full_name, policies)
-
-    grant_access(full_name, service.get("permissions", []))
 
 
 create_sql_policy_functions()
