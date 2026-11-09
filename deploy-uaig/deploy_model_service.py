@@ -201,6 +201,8 @@ def get_model_service(full_name):
 BUILTIN_TYPES = ["block_unsafe_content", "block_jailbreak", "block_hallucination", "detect_sensitive_data"]
 DEFAULT_PHASES = {"block_jailbreak": ["input"], "block_hallucination": ["output"], "llm_judge": ["input"]}
 PHASES = {"input": "pre_call", "output": "post_call"}
+# detect_sensitive_data actions: the config uses the UI's names, and the API calls redact "transform".
+SENSITIVE_DATA_ACTIONS = {"block": "block", "redact": "transform"}
 
 
 def build_policy_options(policy):
@@ -213,7 +215,7 @@ def build_policy_options(policy):
         dict: Options such as phases, mode, evaluator, and action.
 
     Raises:
-        ValueError: If a phase is invalid or an LLM judge policy has no evaluator.
+        ValueError: If a phase or sensitive data action is invalid, or an LLM judge policy has no evaluator.
     """
     policy_type = policy["type"]
     phases = policy.get("phases", DEFAULT_PHASES.get(policy_type, ["input", "output"]))
@@ -227,7 +229,10 @@ def build_policy_options(policy):
     }
 
     if policy_type == "detect_sensitive_data":
-        options["action"] = policy.get("action", "block")
+        action = policy.get("action", "block")
+        if action not in SENSITIVE_DATA_ACTIONS:
+            raise ValueError(f"Unknown action '{action}' in policy '{policy['name']}'. Use block or redact.")
+        options["action"] = SENSITIVE_DATA_ACTIONS[action]
         options["categories"] = ",".join(c if c.startswith("class.") else f"class.{c}" for c in policy["categories"])
         return options
 

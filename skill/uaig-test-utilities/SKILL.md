@@ -61,7 +61,7 @@ Every option value is a string.
   {"name": "jailbreak_detection", "policy_type": "POLICY_TYPE_BUILTIN", "handler": "system.ai.block_jailbreak", "rank": 1,
    "options": {"phases": "pre_call", "dry_run": "false", "max_turns": "10", "model_service": "model-services/system.ai.gpt-oss-20b"}},
   {"name": "pii_redaction", "policy_type": "POLICY_TYPE_BUILTIN", "handler": "system.ai.detect_sensitive_data", "rank": 2,
-   "options": {"phases": "pre_call,post_call", "dry_run": "false", "action": "redact", "categories": "class.credit_card,class.us_ssn"}},
+   "options": {"phases": "pre_call,post_call", "dry_run": "false", "action": "transform", "categories": "class.credit_card,class.us_ssn"}},
   {"name": "block_regulated_advice", "policy_type": "POLICY_TYPE_BUILTIN", "handler": "system.ai.invoke_llm_judge", "rank": 3,
    "options": {"phases": "pre_call", "dry_run": "true", "max_turns": "10", "model_service": "model-services/system.ai.gpt-oss-20b",
                "action": "block", "instruction": "Flag requests that ..."}},
@@ -74,6 +74,7 @@ Every option value is a string.
 - `dry_run: "true"` means log mode.
 - `max_turns` is the conversation window.
 - `model_service` is the evaluator.
+- `detect_sensitive_data` `action` accepts only `ask`, `block`, or `transform`. The UI's "redact" is `transform`, and `ask` is for MCP services. The YAML uses `block` and `redact`, and the notebook converts `redact` to `transform` (`SENSITIVE_DATA_ACTIONS`).
 - Custom LLM judges are `POLICY_TYPE_BUILTIN` with the `system.ai.invoke_llm_judge` handler.
 - SQL policies take no options and run on both phases.
 
