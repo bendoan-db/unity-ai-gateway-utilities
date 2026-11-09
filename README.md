@@ -100,9 +100,10 @@ service_policies:
 
 ```yaml
 groups:
-  - name: poc-developers
+  - name: poc-admins
     model_services:
       - my_catalog.ai_gateway.poc_developers_chat
+    privileges: [EXECUTE, MANAGE]
 
 users:
   - name: first.last@example.com
@@ -110,7 +111,19 @@ users:
       - my_catalog.ai_gateway.poc_developers_chat
 ```
 
-This is the only place to grant access to model services. The default privilege is `EXECUTE`, which lets them query the service. The notebook also grants `USE CATALOG` and `USE SCHEMA` on each service's catalog and schema. Services can be in any catalog and schema, including ones this repo didn't create.
+This is the only place to grant access to model services. Services can be in any catalog and schema, including ones this repo didn't create.
+
+Set `privileges` to any of these. If you leave it out, the default is `EXECUTE`.
+
+| Privilege | What it allows on a model service |
+|---|---|
+| `EXECUTE` | Query the service. Most users need only this. |
+| `READ_METADATA` | View the service's settings and permissions without querying it. |
+| `APPLY_TAG` | Add and edit tags on the service. |
+| `MANAGE` | Change or delete the service and control who can access it. Give it only to people who administer the service. |
+| `ALL_PRIVILEGES` | Every privilege except `MANAGE` and `READ_METADATA`. |
+
+Names can also be written with spaces, such as `READ METADATA`. The notebook also grants `USE CATALOG` and `USE SCHEMA` on each service's catalog and schema, which everyone needs to reach a service.
 
 ## How to Run
 

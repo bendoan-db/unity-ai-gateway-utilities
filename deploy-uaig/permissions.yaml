@@ -7,8 +7,17 @@
 # Each entry:
 #   name:           group name, user email, or service principal application ID
 #   model_services: three-part names (catalog.schema.service) they can access
-#   privileges:     optional. Default [EXECUTE], which lets them query the service.
-#                   Add MANAGE only for people who also administer the service.
+#   privileges:     optional. Default [EXECUTE]. Applies to every service in the entry.
+#
+# Privileges you can grant on a model service:
+#   EXECUTE         Query the service. Most users need only this.
+#   READ_METADATA   View the service's settings and permissions without querying it.
+#   APPLY_TAG       Add and edit tags on the service.
+#   MANAGE          Change or delete the service and control who can access it. Give it only to
+#                   people who administer the service.
+#   ALL_PRIVILEGES  Every privilege except MANAGE and READ_METADATA.
+# Names can also be written with spaces, e.g. READ METADATA.
+# Example: privileges: [EXECUTE, MANAGE]
 #
 # The notebook also grants USE CATALOG and USE SCHEMA on each service's catalog and schema.
 # Access is only added. Removing an entry here doesn't revoke access.
